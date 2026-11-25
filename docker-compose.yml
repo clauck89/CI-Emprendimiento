@@ -1,0 +1,63 @@
+services:
+  webapp:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    container_name: veredacode_web
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:80"
+    volumes:
+      - wordpress_data:/var/www/html:ro
+    networks:
+      - red_interna
+    depends_on:
+      wordpress:
+        condition: service_started
+
+  wordpress:
+    image: wordpress:6.7-fpm-alpine
+    container_name: veredacode_wordpress
+    restart: unless-stopped
+    environment:
+      WORDPRESS_DB_HOST: database:3306
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE:-veredacode_db}
+      WORDPRESS_DB_USER: ${MYSQL_USER:-veredacode_user}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD:-veredacode_pass_seguro}
+      WORDPRESS_DEBUG: ${WORDPRESS_DEBUG:-0}
+    volumes:
+      - wordpress_data:/var/www/html
+      - ./wordpress/mu-plugins/veredacode-headless.php:/var/www/html/wp-content/mu-plugins/veredacode-headless.php:ro
+    networks:
+      - red_interna
+    depends_on:
+      database:
+        condition: service_healthy
+
+  database:
+    image: mysql:8.0
+    container_name: veredacode_bd
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_pass_seguro}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-veredacode_db}
+      MYSQL_USER: ${MYSQL_USER:-veredacode_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-veredacode_pass_seguro}
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - red_interna
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 25s
+
+networks:
+  red_interna:
+    driver: bridge
+
+volumes:
+  db_data:
+  wordpress_data:

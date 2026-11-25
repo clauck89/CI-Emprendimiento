@@ -1,0 +1,70 @@
+name: VeredaCode CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  frontend-pwa:
+    name: Frontend PWA (Tests, Build y Presupuesto de Datos)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar pruebas unitarias (Vitest)
+        run: npm test
+
+      - name: Compilar PWA de producción
+        run: npm run build
+
+      - name: Verificar presupuesto de bajo ancho de banda (dist < 1.5 MB)
+        run: |
+          SIZE_KB=$(du -sk dist | awk '{print $1}')
+          echo "Peso total de frontend/dist: ${SIZE_KB} KB"
+          if [ "$SIZE_KB" -gt 1536 ]; then
+            echo "ERROR: El build excede el presupuesto de bajo consumo (1536 KB)."
+            exit 1
+          fi
+
+  infra-y-headless-cms:
+    name: Infraestructura Docker, Nginx y Headless WordPress
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name: Validar sintaxis PHP del mu-plugin de WordPress
+        run: |
+          docker run --rm -v "${{ github.workspace }}/wordpress:/code:ro" php:8.3-cli-alpine \
+            php -l /code/mu-plugins/veredacode-headless.php
+
+      - name: Validar docker-compose.yml
+        run: docker compose config -q
+
+      - name: Construir imagen multi-etapa webapp (Vue 3 PWA + Nginx)
+        run: docker build -f nginx/Dockerfile -t veredacode-webapp:ci .
+
+      - name: Verificar configuración de Nginx (nginx -t)
+        run: |
+          docker run --rm --entrypoint sh veredacode-webapp:ci -c \
+            "sed 's/wordpress:9000/127.0.0.1:9000/g' /etc/nginx/conf.d/default.conf > /tmp/test.conf && \
+             cp /tmp/test.conf /etc/nginx/conf.d/default.conf && \
+             nginx -t"
